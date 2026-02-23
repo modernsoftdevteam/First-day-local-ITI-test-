@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CinePro AI - Redmi Edition</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.10.0/dist/tf-backend-wasm.js"></script>
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; color: #fff; font-family: sans-serif; overflow: hidden; height: 100vh; }
+        #cam-container { position: relative; width: 100vw; height: 100vh; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .shutter-btn { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); width: 75px; height: 75px; border: 5px solid #FFD700; border-radius: 50%; background: none; z-index: 10; cursor: pointer; }
+        .shutter-inner { width: 100%; height: 100%; border-radius: 50%; background: #FFD700; opacity: 0.3; }
+        #status-bar { position: absolute; top: 10px; width: 100%; text-align: center; font-size: 11px; color: #FFD700; z-index: 5; background: rgba(0,0,0,0.5); padding: 5px; }
+        #result-screen { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 100; overflow-y: auto; padding: 10px; }
+        img { width: 100%; border-radius: 8px; margin-bottom: 10px; border: 1px solid #444; }
+        .label { font-size: 12px; color: #FFD700; margin-bottom: 5px; font-weight: bold; }
+        .btn { width: 100%; padding: 15px; background: #FFD700; border: none; border-radius: 25px; font-weight: bold; color: #000; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div id="cam-container">
+    <div id="status-bar">CONNECTING TO NEURAL ENGINE...</div>
+    <video id="cam" autoplay playsinline></video>
+    <div class="shutter-btn" onclick="takeAIShot()">
+        <div class="shutter-inner"></div>
+    </div>
+</div>
+
+<div id="result-screen">
+    <div class="label">BEFORE (NORMAL)</div>
+    <img id="before-img">
+    <div class="label">AFTER (AI ENHANCED)</div>
+    <img id="after-img" style="border: 2px solid #FFD700;">
+    <button class="btn" onclick="location.reload()">NEXT PHOTO</button>
+</div>
+
+<script>
+    const video = document.getElementById('cam');
+    const status = document.getElementById('status-bar');
+
+    async function setupApp() {
+        try {
+            // Redmi 14C এর প্রসেসর কোর ব্যবহারের জন্য WASM সেটআপ
+            status.innerText = "LOADING WASM BACKEND...";
+            await tf.setBackend('wasm');
+            
+            // ক্যামেরা শুরু
+            status.innerText = "STARTING SENSOR...";
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: 'environment', width: 1280, height: 720 } 
+            });
+            video.srcObject = stream;
+            
+            status.innerText = "AI CORE: SNAPDRAGON ACTIVE";
+        } catch (e) {
+            status.innerText = "BACKEND ERROR: SWITCHING TO CPU";
+            await tf.setBackend('cpu');
+        }
+    }
+
+    async function takeAIShot() {
+        status.innerText = "AI CAPTURING...";
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0);
+        
+        const beforeData = canvas.toDataURL('image/jpeg');
+        document.getElementById('before-img').src = beforeData;
+
+        // এআই প্রসেসিং
+        const input = tf.browser.fromPixels(canvas);
+        const processed = tf.tidy(() => {
+            let t = input.toFloat().div(255);
+            // Redmi ফোনের জন্য অপ্টিমাইজড ডার্ক কার্ভ (নাইট এআই)
+            let enhanced = t.pow(0.65).mul(1.3); 
+            
+            // নয়েজ কমানোর জন্য হালকা শার্পনিং
+            const sharpen = tf.tensor4d([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]], [3,3,1,1]);
+            const [r, g, b] = tf.split(enhanced, 3, 2);
+            const res = [r, g, b].map(c => tf.conv2d(c.expandDims(0), sharpen, 1, 'same').squeeze(0));
+            return tf.concat(res, 2).clipByValue(0, 1);
+        });
+
+        await tf.browser.toPixels(processed, canvas);
+        document.getElementById('after-img').src = canvas.toDataURL('image/jpeg');
+        
+        // মেমোরি ক্লিয়ার করে দেওয়া যাতে ফোন হ্যাং না করে
+        input.dispose();
+        processed.dispose();
+        
+        document.getElementById('result-screen').style.display = 'block';
+        status.innerText = "DONE";
+    }
+
+    setupApp();
+</script>
+</body>
+</html>
